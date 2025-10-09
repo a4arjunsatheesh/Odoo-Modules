@@ -1,5 +1,6 @@
 from odoo import models, _
 from odoo.tools import config
+from odoo.tools.misc import formatLang
 import markupsafe
 
 
@@ -70,6 +71,8 @@ class AccountReport(models.Model):
     def _get_lines(self, options, line_id=None):
         lines = super()._get_lines(options, line_id)
         if self._context.get('export_to_pdf2'):
+            credit_total = 0
+            debit_total = 0
             for line in list(lines):
                 if line.get('name') == _('Initial Balance'):
                     line['name'] = _('Previous Balance')
@@ -85,10 +88,38 @@ class AccountReport(models.Model):
                             line['columns'][6]['no_format'] = abs(col_val)
                             line['columns'][6]['name'] = col_fmt.replace('-',
                                                                          '').strip()
+                            credit_total += line['columns'][6]['no_format']
                         elif col_val > 0:
                             line['columns'][5]['no_format'] = col_val
-                            line['columns'][5]['name'] = col_fmt.strip()
+                            line['columns'][5]['name'] = col_fmt.replace('-',
+                                                                         '').strip()
+                            debit_total += line['columns'][5]['no_format']
+                        if col_val == 0:
+                            line['columns'][8][
+                                'name'] = formatLang(self.env,
+                                                     abs(0),
+                                                     currency_obj=self.env.company.currency_id)
                 elif self.env['res.partner'].search(
                         [('name', '=', line.get('name'))]):
                     lines.remove(line)
+                elif line.get('name') == 'Total':
+                    line['columns'][5]['no_format'] = abs(debit_total)
+                    line['columns'][5]['name'] = formatLang(self.env,
+                                                            abs(debit_total),
+                                                            currency_obj=self.env.company.currency_id)
+                    line['columns'][6]['no_format'] = abs(credit_total)
+                    line['columns'][6]['name'] = formatLang(self.env,
+                                                            abs(credit_total),
+                                                            currency_obj=self.env.company.currency_id)
+                    total = debit_total - credit_total
+                    line['columns'][8]['no_format'] = abs(total)
+                    line['columns'][8]['name'] = formatLang(self.env,
+                                                            abs(total),
+                                                            currency_obj=self.env.company.currency_id)
+
+                else:
+                    debit = line['columns'][5].get('no_format', 0.0)
+                    credit = line['columns'][6].get('no_format', 0.0)
+                    debit_total += debit
+                    credit_total += credit
         return lines

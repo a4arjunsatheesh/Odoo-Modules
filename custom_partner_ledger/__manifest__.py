@@ -2,8 +2,8 @@
     'name': 'Custom Partner Ledger',
     'version': '16.0.1.0.0',
     'category': 'Accounting',
-    'summary': 'Customization of the Partner Ledger to display the Previous '
-               'Balance.',
+    'summary': 'Customization of the Partner Ledger to create a new pdf report '
+               'to print the Previous Balance.',
     'description': """Implemented a customization in the Partner Ledger report 
     to replace the default ‘Initial Balance’ entry with a ‘Previous Balance’ 
     line. This enhancement ensures clearer financial visibility by showing the 
