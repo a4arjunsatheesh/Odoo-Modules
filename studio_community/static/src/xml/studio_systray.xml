@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="studio_community.StudioSystray" owl="1">
+        <button
+            class="btn border-0 bg-transparent px-2"
+            type="button"
+            title="Studio"
+            aria-label="Studio"
+            t-on-click="onClick"
+        >
+            <i class="fa fa-wrench" role="img" aria-hidden="true"/>
+        </button>
+    </t>
+
+    <t t-name="studio_community.StudioBuilderDialog" owl="1">
+        <Dialog
+            title="dialogTitle"
+            size="'fullscreen'"
+            contentClass="'o_studio_community_dialog'"
+            bodyClass="'p-0'"
+            footer="false"
+        >
+            <div class="o_studio_community_builder">
+                <aside class="o_studio_sidebar">
+                    <div class="o_studio_sidebar_header">
+                        <t t-if="!isInspectorVisible">
+                            <h5 class="mb-1" t-esc="props.viewContext.actionName"/>
+                            <p class="text-muted mb-0">
+                                <t t-esc="props.viewContext.resModel"/>
+                                <span class="mx-1">•</span>
+                                <t t-esc="viewTypeLabel"/>
+                                <span> view</span>
+                            </p>
+                            <p class="text-muted mt-3 mb-0">
+                                Click a field label or value in the preview to edit its label.
+                            </p>
+                        </t>
+                        <t t-if="isInspectorVisible">
+                            <button class="btn btn-link p-0 mb-2" type="button" t-on-click="backToPreviewHelp">
+                                <i class="fa fa-arrow-left me-1" aria-hidden="true"/>
+                                Back to preview help
+                            </button>
+                            <h5 class="mb-1" t-esc="selectedFieldTitle"/>
+                            <p class="text-muted mb-0">Field details from the current view</p>
+                        </t>
+                    </div>
+                    <t t-if="isInspectorVisible">
+                        <div class="o_studio_sidebar_section">
+                            <h6>Field Details</h6>
+                            <div class="o_studio_field_details">
+                                <div class="o_studio_detail_row">
+                                    <span class="o_studio_detail_label">Field Label</span>
+                                    <input
+                                        class="form-control"
+                                        type="text"
+                                        t-att-value="state.selectedField.label"
+                                        t-on-input="onFieldLabelInput"
+                                    />
+                                </div>
+                                <div class="o_studio_detail_row">
+                                    <span class="o_studio_detail_label">Technical Name</span>
+                                    <code t-esc="state.selectedField.technicalName || state.selectedField.fieldName"/>
+                                </div>
+                                <div class="o_studio_detail_row">
+                                    <span class="o_studio_detail_label">Type</span>
+                                    <span t-esc="state.selectedField.type"/>
+                                </div>
+                                <div class="o_studio_detail_row">
+                                    <span class="o_studio_detail_label">Domain</span>
+                                    <pre t-esc="state.selectedField.domain || '[]'"/>
+                                </div>
+                            </div>
+                        </div>
+                    </t>
+                </aside>
+                <section class="o_studio_canvas">
+                    <div class="o_studio_canvas_header">
+                        <div>
+                            <h5 class="mb-1" t-esc="canvasHeading"/>
+                            <p class="text-muted mb-0" t-esc="canvasHelp"/>
+                        </div>
+                        <button class="btn btn-primary" type="button" t-on-click="onSave">
+                            Save
+                        </button>
+                    </div>
+                    <div class="o_studio_canvas_body o_studio_canvas_body_exact">
+                        <div class="o_studio_exact_preview" t-ref="previewRoot"/>
+                    </div>
+                </section>
+            </div>
+        </Dialog>
+    </t>
+</templates>
