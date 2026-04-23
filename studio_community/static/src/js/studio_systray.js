@@ -13,11 +13,13 @@ function prettifyViewType(viewType) {
     return viewType.charAt(0).toUpperCase() + viewType.slice(1);
 }
 
+function isSupportedViewType(viewType) {
+    return viewType === "form" || viewType === "list";
+}
+
 function getCurrentViewRoot(viewType) {
     const selectors = {
-        calendar: ".o_action_manager .o_calendar_view",
         form: ".o_action_manager .o_form_view",
-        kanban: ".o_action_manager .o_kanban_view",
         list: ".o_action_manager .o_list_view",
     };
     return document.querySelector(selectors[viewType]) || null;
@@ -44,13 +46,22 @@ function getPreviewContentRoot(viewType) {
             root
         );
     }
-    if (viewType === "kanban") {
-        return root.querySelector(".o_kanban_renderer") || root;
+    return null;
+}
+
+function getFieldNameFromLabelFor(root, labelNode) {
+    const forAttr = labelNode.getAttribute("for");
+    if (!forAttr) {
+        return null;
     }
-    if (viewType === "calendar") {
-        return root.querySelector(".o_calendar_renderer") || root;
+
+    const target = root.querySelector(`#${CSS.escape(forAttr)}`);
+    const targetField = target?.closest(".o_field_widget[name]");
+    if (targetField) {
+        return targetField.getAttribute("name");
     }
-    return root;
+
+    return root.querySelector(`.o_field_widget[name="${CSS.escape(forAttr)}"]`) ? forAttr : null;
 }
 
 function sanitizePreviewClone(clone, viewType) {
@@ -81,7 +92,11 @@ function sanitizePreviewClone(clone, viewType) {
             node.classList.add("o_studio_clickable_field");
         });
         clone.querySelectorAll(".o_td_label, .o_wrap_label, .o_form_label").forEach((node) => {
+            const labelField = node.querySelector("label")
+                ? getFieldNameFromLabelFor(clone, node.querySelector("label"))
+                : null;
             const directNextField =
+                labelField ||
                 node.nextElementSibling?.querySelector(":scope .o_field_widget[name]")?.getAttribute("name") ||
                 node.parentElement?.querySelector(":scope > .o_field_widget[name]")?.getAttribute("name") ||
                 node.parentElement?.nextElementSibling
@@ -100,7 +115,7 @@ function sanitizePreviewClone(clone, viewType) {
         });
         clone.querySelectorAll("label").forEach((node) => {
             const fieldName =
-                node.getAttribute("for") ||
+                getFieldNameFromLabelFor(clone, node) ||
                 node.closest("[data-studio-field-name]")?.dataset.studioFieldName ||
                 node.closest(".o_td_label")?.nextElementSibling
                     ?.querySelector(":scope .o_field_widget[name]")
@@ -113,14 +128,6 @@ function sanitizePreviewClone(clone, viewType) {
                     ?.getAttribute("name") ||
                 node.closest("tr")?.querySelector(".o_field_widget[name]")?.getAttribute("name") ||
                 node.closest(".o_wrap_field")?.querySelector(".o_field_widget[name]")?.getAttribute("name");
-            if (!fieldName) {
-                return;
-            }
-            node.dataset.studioFieldName = fieldName;
-            node.classList.add("o_studio_clickable_field");
-        });
-        clone.querySelectorAll(".o_cell, .o_wrap_field").forEach((node) => {
-            const fieldName = node.querySelector(".o_field_widget[name]")?.getAttribute("name");
             if (!fieldName) {
                 return;
             }
@@ -143,29 +150,61 @@ function createPreviewWrapper(viewType) {
         wrapper.classList.add("o_form_view", "o_xxl_form_view");
     } else if (viewType === "list") {
         wrapper.classList.add("o_list_view");
-    } else if (viewType === "kanban") {
-        wrapper.classList.add("o_kanban_view");
-    } else if (viewType === "calendar") {
-        wrapper.classList.add("o_calendar_view");
     }
     return wrapper;
 }
 
-function buildFormFieldsFromDom(root) {
+function getFormFieldLabelNode(root, fieldNode, fieldName) {
+    const fieldId = fieldNode.id;
+    if (fieldId) {
+        const labelById = root.querySelector(`label[for="${CSS.escape(fieldId)}"]`);
+        if (labelById) {
+            return labelById;
+        }
+    }
+
+    const labelByName = root.querySelector(`label[for="${CSS.escape(fieldName)}"]`);
+    if (labelByName) {
+        return labelByName;
+    }
+
+    return null;
+}
+
+function getFieldDescription(fieldDefs, fieldName, fallbackLabel) {
+    const fieldDef = fieldDefs?.[fieldName];
+    if (fieldDef?.fieldDescription) {
+        return fieldDef.fieldDescription;
+    }
+    return fieldDef?.field_description || fieldDef?.string || fieldDef?.label || fallbackLabel || fieldName;
+}
+
+function buildFieldDefs(fields = {}) {
+    return Object.fromEntries(
+        Object.entries(fields || {}).map(([fieldName, fieldDef]) => [
+            fieldName,
+            {
+                fieldDescription: getFieldDescription(fields, fieldName, fieldName),
+                type: fieldDef.type,
+                domain: fieldDef.domain || "[]",
+            },
+        ])
+    );
+}
+
+function buildFormFieldsFromDom(root, fieldDefs = {}) {
     const fields = [];
     const usedNames = new Set();
     const nodes = root.querySelectorAll(".o_field_widget[name]");
 
     for (const node of nodes) {
         const fieldName = node.getAttribute("name");
-        if (!fieldName || usedNames.has(fieldName)) {
+        const parentField = node.parentElement?.closest(".o_field_widget[name]");
+        if (!fieldName || parentField || usedNames.has(fieldName)) {
             continue;
         }
         usedNames.add(fieldName);
-        const labelNode =
-            node.closest(".o_wrap_field")?.previousElementSibling?.querySelector("label") ||
-            node.closest(".o_field_widget")?.parentElement?.querySelector("label") ||
-            root.querySelector(`label[for="${fieldName}"]`);
+        const labelNode = getFormFieldLabelNode(root, node, fieldName);
         const fieldClass = [...node.classList].find(
             (className) => className.startsWith("o_field_") && className !== "o_field_widget"
         );
@@ -173,7 +212,7 @@ function buildFormFieldsFromDom(root) {
         fields.push({
             fieldName,
             technicalName: fieldName,
-            label: labelNode?.textContent?.trim() || fieldName,
+            label: getFieldDescription(fieldDefs, fieldName, labelNode?.textContent?.trim()),
             type: fieldType,
             domain: "[]",
         });
@@ -181,7 +220,47 @@ function buildFormFieldsFromDom(root) {
     return fields;
 }
 
-function buildListFieldsFromDom(root) {
+function getOuterFieldWidget(fieldWidget, previewRoot) {
+    let current = fieldWidget;
+    let outerFieldWidget = fieldWidget;
+
+    while (current?.parentElement && previewRoot.contains(current.parentElement)) {
+        current = current.parentElement.closest(".o_field_widget[name]");
+        if (current) {
+            outerFieldWidget = current;
+        }
+    }
+
+    return outerFieldWidget;
+}
+
+function getClickedFieldName(target, previewRoot) {
+    const fieldWidget = target.closest(".o_field_widget[name]");
+    if (fieldWidget && previewRoot.contains(fieldWidget)) {
+        return getOuterFieldWidget(fieldWidget, previewRoot).getAttribute("name");
+    }
+
+    const explicitNode = target.closest("[data-studio-field-name]");
+    if (explicitNode && previewRoot.contains(explicitNode)) {
+        const containerField = explicitNode.closest(".o_field_widget[name]");
+        if (containerField) {
+            return getOuterFieldWidget(containerField, previewRoot).getAttribute("name");
+        }
+        return explicitNode.dataset.studioFieldName;
+    }
+
+    return null;
+}
+
+function getNodeIndex(node, nodes) {
+    return Array.from(nodes).indexOf(node);
+}
+
+function waitForNextFrame() {
+    return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
+function buildListFieldsFromDom(root, fieldDefs = {}) {
     const fields = [];
     const usedNames = new Set();
     const headers = root.querySelectorAll("th[data-name], th.o_list_controller th");
@@ -196,7 +275,7 @@ function buildListFieldsFromDom(root) {
         fields.push({
             fieldName: fieldName || null,
             technicalName: fieldName || null,
-            label: label || fieldName,
+            label: fieldName ? getFieldDescription(fieldDefs, fieldName, label) : label,
             type: "column",
             domain: "[]",
         });
@@ -210,16 +289,17 @@ function buildViewContextFromScreen(actionService) {
         currentController?.props?.type ||
         (document.querySelector(".o_action_manager .o_form_view") && "form") ||
         (document.querySelector(".o_action_manager .o_list_view") && "list") ||
-        (document.querySelector(".o_action_manager .o_kanban_view") && "kanban") ||
-        (document.querySelector(".o_action_manager .o_calendar_view") && "calendar") ||
         "unknown";
+    if (!isSupportedViewType(viewType)) {
+        return null;
+    }
     const root = getPreviewContentRoot(viewType);
 
     let existingFields = [];
     if (root && viewType === "form") {
-        existingFields = buildFormFieldsFromDom(root);
+        existingFields = buildFormFieldsFromDom(root, currentController?.props?.fields);
     } else if (root && viewType === "list") {
-        existingFields = buildListFieldsFromDom(root);
+        existingFields = buildListFieldsFromDom(root, currentController?.props?.fields);
     }
 
     return {
@@ -228,6 +308,7 @@ function buildViewContextFromScreen(actionService) {
         viewId: currentController?.config?.viewId || null,
         viewType,
         existingFields,
+        fieldDefs: buildFieldDefs(currentController?.props?.fields),
         hasExactPreview: Boolean(root),
     };
 }
@@ -246,6 +327,8 @@ export class StudioBuilderDialog extends Component {
             pendingLabelChanges: {},
             selectedField: null,
         });
+        this.fieldDescriptionCache = {};
+        this.boundPreviewClick = this.onPreviewClick.bind(this);
         onMounted(() => this.mountExactPreview());
     }
 
@@ -317,7 +400,40 @@ export class StudioBuilderDialog extends Component {
         if (!fieldName) {
             return null;
         }
-        return this.props.viewContext.existingFields.find((field) => field.fieldName === fieldName) || null;
+        const metadata = this.props.viewContext.existingFields.find((field) => field.fieldName === fieldName);
+        const fieldDef = this.props.viewContext.fieldDefs?.[fieldName];
+        if (!metadata && !fieldDef) {
+            return null;
+        }
+        return {
+            fieldName,
+            technicalName: metadata?.technicalName || fieldName,
+            label: fieldDef?.fieldDescription || metadata?.label || fieldName,
+            type: fieldDef?.type || metadata?.type,
+            domain: fieldDef?.domain || metadata?.domain || "[]",
+        };
+    }
+
+    async loadFieldDescription(fieldName) {
+        if (!fieldName || !this.props.viewContext.resModel) {
+            return null;
+        }
+        if (Object.hasOwn(this.fieldDescriptionCache, fieldName)) {
+            return this.fieldDescriptionCache[fieldName];
+        }
+
+        const [fieldRecord] = await this.orm.searchRead(
+            "ir.model.fields",
+            [
+                ["model", "=", this.props.viewContext.resModel],
+                ["name", "=", fieldName],
+            ],
+            ["field_description"],
+            { limit: 1 }
+        );
+        const fieldDescription = fieldRecord?.field_description || null;
+        this.fieldDescriptionCache[fieldName] = fieldDescription;
+        return fieldDescription;
     }
 
     clearSelectedPreviewNodes() {
@@ -336,21 +452,65 @@ export class StudioBuilderDialog extends Component {
             .forEach((node) => node.classList.add("o_studio_selected_field"));
     }
 
-    onPreviewClick(ev) {
-        const fieldNode = ev.target.closest("[data-studio-field-name]");
-        if (!fieldNode || !this.previewRef.el?.contains(fieldNode)) {
+    async onPreviewClick(ev) {
+        const previewRoot = this.previewRef.el;
+        if (!previewRoot) {
             return;
         }
-        ev.preventDefault();
-        ev.stopPropagation();
-        const fieldName = fieldNode.dataset.studioFieldName;
+        if (await this.switchNotebookPage(ev)) {
+            return;
+        }
+        const fieldName = getClickedFieldName(ev.target, previewRoot);
         const metadata = this.findFieldMetadata(fieldName);
         if (!metadata) {
             return;
         }
+        ev.preventDefault();
+        ev.stopPropagation();
+        const fieldDescription = await this.loadFieldDescription(fieldName);
+        if (fieldDescription) {
+            metadata.label = fieldDescription;
+        }
         this.state.selectedField = metadata;
         this.state.inspectorMode = "details";
         this.highlightSelectedField(fieldName);
+    }
+
+    async switchNotebookPage(ev) {
+        const previewRoot = this.previewRef.el;
+        const previewLink = ev.target.closest(".o_notebook_headers .nav-link");
+        if (!previewRoot || !previewLink || !previewRoot.contains(previewLink)) {
+            return false;
+        }
+        if (previewLink.closest(".nav-item")?.classList.contains("disabled")) {
+            return false;
+        }
+
+        ev.preventDefault();
+        ev.stopPropagation();
+
+        const previewNotebook = previewLink.closest(".o_notebook");
+        const previewNotebooks = previewRoot.querySelectorAll(".o_notebook");
+        const notebookIndex = getNodeIndex(previewNotebook, previewNotebooks);
+        const linkIndex = getNodeIndex(
+            previewLink,
+            previewNotebook.querySelectorAll(".o_notebook_headers .nav-link")
+        );
+        if (notebookIndex < 0 || linkIndex < 0) {
+            return true;
+        }
+
+        const currentRoot = getPreviewContentRoot(this.props.viewContext.viewType);
+        const sourceNotebook = currentRoot?.querySelectorAll(".o_notebook")?.[notebookIndex];
+        const sourceLink = sourceNotebook?.querySelectorAll(".o_notebook_headers .nav-link")?.[linkIndex];
+        if (!sourceLink) {
+            return true;
+        }
+
+        sourceLink.click();
+        await waitForNextFrame();
+        this.mountExactPreview();
+        return true;
     }
 
     onFieldLabelInput(ev) {
@@ -409,7 +569,8 @@ export class StudioBuilderDialog extends Component {
         const wrapper = createPreviewWrapper(this.props.viewContext.viewType);
         wrapper.appendChild(clone);
         previewHost.replaceChildren(wrapper);
-        previewHost.addEventListener("click", this.onPreviewClick.bind(this));
+        previewHost.removeEventListener("click", this.boundPreviewClick);
+        previewHost.addEventListener("click", this.boundPreviewClick);
     }
 }
 
@@ -419,12 +580,19 @@ export class StudioSystray extends Component {
     setup() {
         this.action = useService("action");
         this.dialog = useService("dialog");
+        this.notification = useService("notification");
     }
 
     onClick() {
         const viewContext =
             this.action.currentController?.studioCommunityViewContext ||
             buildViewContextFromScreen(this.action);
+        if (!viewContext || !isSupportedViewType(viewContext.viewType)) {
+            this.notification.add(_t("Studio Community is available only in form and list views."), {
+                type: "warning",
+            });
+            return;
+        }
         this.dialog.add(StudioBuilderDialog, { viewContext });
     }
 }

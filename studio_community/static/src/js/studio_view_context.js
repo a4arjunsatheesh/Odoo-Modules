@@ -6,7 +6,7 @@ import { ListController } from "@web/views/list/list_controller";
 import { onMounted, onRendered } from "@odoo/owl";
 
 function getFieldLabel(fieldInfo, fieldDef, fallbackName) {
-    return fieldInfo?.string || fieldDef?.string || fieldDef?.label || fallbackName;
+    return fieldDef?.field_description || fieldDef?.string || fieldDef?.label || fieldInfo?.string || fallbackName;
 }
 
 function buildExistingField(field) {
@@ -17,6 +17,19 @@ function buildExistingField(field) {
         type: field.type,
         domain: field.domain || "[]",
     };
+}
+
+function buildFieldDefs(fields) {
+    return Object.fromEntries(
+        Object.entries(fields || {}).map(([fieldName, fieldDef]) => [
+            fieldName,
+            {
+                fieldDescription: fieldDef.field_description || fieldDef.string || fieldDef.label || fieldName,
+                type: fieldDef.type,
+                domain: fieldDef.domain || "[]",
+            },
+        ])
+    );
 }
 
 function isNestedFieldNode(node) {
@@ -74,6 +87,7 @@ function buildFormViewContext(controller) {
         viewId: controller.env.config.viewId,
         viewType: "form",
         existingFields,
+        fieldDefs: buildFieldDefs(controller.props.fields),
     };
 }
 
@@ -89,7 +103,7 @@ function buildListViewContext(controller) {
                 {
                     name: column.name,
                     technicalName: column.name,
-                    label: column.label || column.string || column.name,
+                    label: getFieldLabel(column, controller.props.fields[column.name], column.name),
                     type: column.fieldType || column.type,
                     domain: column.domain || controller.props.fields[column.name]?.domain || "[]",
                 }
@@ -103,6 +117,7 @@ function buildListViewContext(controller) {
         viewId: controller.env.config.viewId,
         viewType: "list",
         existingFields,
+        fieldDefs: buildFieldDefs(controller.props.fields),
     };
 }
 
